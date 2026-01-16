@@ -117,7 +117,7 @@ if st.session_state.carrinho:
 
     if st.button("📄 Gerar PDF (download)"):
         # chama endpoint de PDF que já existe
-        pdf_resp = requests.post(f"{API}/pdf", json={"cliente": cliente, "itens": st.session_state.carrinho})
+        pdf_resp = requests.post(f"{API}/orcamento/camisetas", json={"cliente":cliente,"itens":itens})
         if pdf_resp.status_code == 200:
             st.download_button("📥 Baixar Orçamento", data=pdf_resp.content, file_name=f"Orcamento_{cliente}.pdf")
         else:
