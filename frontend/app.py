@@ -1,4 +1,6 @@
-import streamlit as st, requests, pandas as pd
+import streamlit as st
+import requests
+import pandas as pd
 
 API = "https://atlantiz-api.fly.dev"
 
@@ -21,7 +23,6 @@ with aba2:
         f3 = col[2].number_input("Preço F3", 0.0)
         submitted = st.form_submit_button("Salvar")
         if submitted and nome:
-            # envia novo produto para API (endpoint simples)
             payload = {"Nome": nome, "Tipo": tipo, "F1": f1, "Q2": q2, "F2": f2, "Q3": q3, "F3": f3}
             r = requests.post(f"{API}/precos", json=payload)
             if r.ok:
@@ -41,16 +42,20 @@ with aba1:
         qm = cols[1].number_input("M (6,75)", 0)
         qg = cols[2].number_input("G (11,75)", 0)
         qgg = cols[3].number_input("GG (32,5)", 0)
-        custo_estampa = qp*1.8 + qm*6.75 + qg*11.75 + qgg*32.5
-        # simula valor base da malha (substitua pela busca real se quiser)
+        custo_estampa = qp * 1.8 + qm * 6.75 + qg * 11.75 + qgg * 32.5
         valor_base = 25
         unit = (valor_base + 5 + custo_estampa) * 1.07
         total_item = unit * qtd
         if st.button("Adicionar camisetas"):
-            st.session_state.carrinho.append({"Produto": malha, "Qtd": qtd, "Unitario": unit, "Total": total_item, "Categoria": "Vestuario"})
+            st.session_state.carrinho.append({
+                "Produto": malha,
+                "Qtd": qtd,
+                "Unitario": round(unit, 2),
+                "Total": round(total_item, 2),
+                "Categoria": "Vestuario"
+            })
 
     else:  # OUTROS PRODUTOS
-        # busca lista de produtos cadastrados
         r = requests.get(f"{API}/precos")
         if r.ok:
             produtos = r.json()
@@ -64,7 +69,6 @@ with aba1:
                     lar = st.number_input("Largura (m)", 0.1, 10.0, 1.0)
                     alt = st.number_input("Altura (m)", 0.1, 10.0, 1.0)
                     area = lar * alt
-                    # escolhe faixa
                     if modo == "F3" and prod["Q3"] > 0 and area * qtd_outros >= prod["Q3"]:
                         preco = prod["F3"]
                     elif modo == "F2" and prod["Q2"] > 0 and area * qtd_outros >= prod["Q2"]:
@@ -85,10 +89,16 @@ with aba1:
                 total_outros = unitario * qtd_outros
                 st.info(f"Unitário: R$ {unitario:.2f}")
                 if st.button("Adicionar material"):
-                    st.session_state.carrinho.append({"Produto": sel, "Qtd": qtd_outros, "Unitario": unitario, "Total": total_outros, "Categoria": "Outros", "Dimensoes": dimensoes})
+                    st.session_state.carrinho.append({
+                        "Produto": sel,
+                        "Qtd": qtd_outros,
+                        "Unitario": round(unitario, 2),
+                        "Total": round(total_outros, 2),
+                        "Categoria": "Outros",
+                        "Dimensoes": dimensoes
+                    })
             else:
                 st.warning("Nenhum produto cadastrado ainda. Use a aba ⚙️ Cadastrar Produtos.")
-
         else:
             st.error("Não consegui buscar produtos cadastrados.")
 
@@ -116,8 +126,7 @@ if st.session_state.carrinho:
     st.markdown(f"### Total geral: **R$ {total_geral:.2f}**")
 
     if st.button("📄 Gerar PDF (download)"):
-        # chama endpoint de PDF que já existe
-        pdf_resp = requests.post(f"{API}/orcamento/camisetas", json={"cliente":cliente,"itens":itens})
+        pdf_resp = requests.post(f"{API}/pdf", json={"cliente": cliente, "itens": st.session_state.carrinho})
         if pdf_resp.status_code == 200:
             st.download_button("📥 Baixar Orçamento", data=pdf_resp.content, file_name=f"Orcamento_{cliente}.pdf")
         else:

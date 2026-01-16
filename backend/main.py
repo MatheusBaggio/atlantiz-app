@@ -1,7 +1,11 @@
 from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
+from pydantic import BaseModel
 import pandas as pd
 import os
+import io
+from fpdf import FPDF
 
 app = FastAPI(title="Atlantiz-API")
 app.add_middleware(
@@ -15,24 +19,67 @@ app.add_middleware(
 def calcular(total_itens):
     return round(total_itens * 1.07, 2)
 
-CSV_PATH = "/app/meus_precos.csv"
+def limpar_moeda(valor):
+    if pd.isna(valor):
+        return 0.0
+    s = str(valor).replace('R$', '').replace(' ', '').replace('.', '').replace(',', '.')
+    try:
+        return float(s)
+    except:
+        return 0.0
+
+def buscar_preco_malha(malha: str, qtd: int) -> float:
+    csv_path = "/app/tabela_camisetas.csv"
+    if not os.path.exists(csv_path):
+        return 0.0
+    try:
+        df = pd.read_csv(csv_path, sep=';', skiprows=37, encoding='utf-8')
+        df = df.head(10).rename(columns={df.columns[0]: 'Produto'})
+        faixas = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 15, 20, 25, 26, 50]
+        alvo = max([f for f in faixas if f <= qtd], default=1)
+        linha = df[df['Produto'].astype(str).str.strip() == malha.strip()]
+        if linha.empty:
+            return 0.0
+        valor_bruto = str(linha[str(alvo)].values[0])
+        valor_limp = valor_bruto.replace('R$', '').replace(' ', '').replace('.', '').replace(',', '.')
+        return float(valor_limp)
+    except Exception as e:
+        print("Erro ao ler tabela:", e)
+        return 0.0
+
+# ---------- LEITURA / GRAVAÇÃO DE CSV DE PRODUTOS ----------
+CSV_PRECOS = "/app/meus_precos.csv"
 
 def ler_csv_precos():
-    if not os.path.exists(CSV_PATH):
+    if not os.path.exists(CSV_PRECOS):
         return []
-    return pd.read_csv(CSV_PATH).to_dict(orient="records")
+    df = pd.read_csv(CSV_PRECOS)
+    return df.to_dict(orient="records")
 
 def salvar_csv_precos(dados):
     df = pd.DataFrame(dados)
-    df.to_csv(CSV_PATH, index=False)
+    df.to_csv(CSV_PRECOS, index=False)
 
-# ---------- ENDPOINTS ----------
-# ---------- ORÇAMENTO CAMISETAS ----------
+# ---------- MODELOS ----------
 class CamisetaItem(BaseModel):
     Produto: str
     Qtd: int
     Custo_Estampa: float
 
+class PDF(FPDF):
+    def header(self):
+        if os.path.exists("/app/topo.png"):
+            self.image("/app/topo.png", 0, 0, 210)
+        self.set_font("Arial", "B", 26)
+        self.set_text_color(255, 102, 0)
+        self.cell(0, 45, "ORÇAMENTO", ln=True, align="L")
+        self.ln(8)
+
+    def footer(self):
+        if os.path.exists("/app/rodape.png"):
+            self.image("/app/rodape.png", 0, 278, 210)
+
+# ---------- ENDPOINTS ----------
 @app.post("/orcamento/camisetas")
 def orcamento_camisetas(dados: dict):
     itens = [CamisetaItem(**i) for i in dados["itens"]]
@@ -52,58 +99,23 @@ def orcamento_camisetas(dados: dict):
     total_geral = sum(i["Total"] for i in novo_carrinho)
     return {"cliente": dados["cliente"], "itens": novo_carrinho, "total": round(total_geral, 2)}
 
-# ---------- LEITURA DA TABELA DE CAMISETAS ----------
-def buscar_preco_malha(malha: str, qtd: int) -> float:
-    """
-    Lê tabela_camisetas.csv e retorna o valor da malha na faixa de quantidade
-    """
-    csv_path = "/app/tabela_camisetas.csv"
-    if not os.path.exists(csv_path):
-        return 0.0
-    try:
-        df = pd.read_csv(csv_path, sep=';', skiprows=37, encoding='utf-8')
-        df = df.head(10).rename(columns={df.columns[0]: 'Produto'})
-        # faixas da tabela
-        faixas = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 15, 20, 25, 26, 50]
-        alvo = max([f for f in faixas if f <= qtd], default=1)
-        linha = df[df['Produto'].astype(str).str.strip() == malha.strip()]
-        if linha.empty:
-            return 0.0
-        valor = str(linha[str(alvo)].values[0]).replace('R$', '').replace('.', '').replace(',', '.')
-        return float(valor)
-    except Exception:
-        return 0.0
-    
-# ---------- UPLOAD DE ARQUIVOS (opcional, mantido) ----------
-@app.post("/upload/camisetas")
-def upload_camisetas(file: UploadFile = File(...)):
-    with open("/app/tabela_camisetas.csv", "wb") as f:
-        f.write(file.file.read())
+@app.post("/orcamento")
+def orcamento_outros(dados: dict):
+    # para produtos terceiros (sem malha)
+    total = sum(i["Total"] for i in dados["itens"])
+    return {"cliente": dados["cliente"], "total": calcular(total)}
+
+@app.get("/precos")
+def get_precos():
+    return ler_csv_precos()
+
+@app.post("/precos")
+def post_precos(prod: dict):
+    dados = ler_csv_precos()
+    dados = [d for d in dados if d["Nome"] != prod["Nome"]]
+    dados.append(prod)
+    salvar_csv_precos(dados)
     return {"ok": True}
-
-@app.post("/upload/precos")
-def upload_precos(file: UploadFile = File(...)):
-    with open(CSV_PATH, "wb") as f:
-        f.write(file.file.read())
-    return {"ok": True}
-
-# ---------- GERAÇÃO DE PDF ----------
-from fpdf import FPDF
-import io
-from fastapi.responses import Response
-
-class PDF(FPDF):
-    def header(self):
-        if os.path.exists("/app/topo.png"):
-            self.image("/app/topo.png", 0, 0, 210)
-        self.set_font("Arial", "B", 26)
-        self.set_text_color(255, 102, 0)
-        self.cell(0, 45, "ORÇAMENTO", ln=True, align="L")
-        self.ln(8)
-
-    def footer(self):
-        if os.path.exists("/app/rodape.png"):
-            self.image("/app/rodape.png", 0, 278, 210)
 
 @app.post("/pdf")
 def gerar_pdf(dados: dict):
@@ -165,3 +177,14 @@ def gerar_pdf(dados: dict):
     return Response(content=buffer.getvalue(), media_type="application/pdf",
                     headers={"Content-Disposition": f"attachment; filename=Orcamento_{dados['cliente']}.pdf"})
 
+@app.post("/upload/camisetas")
+def upload_camisetas(file: UploadFile = File(...)):
+    with open("/app/tabela_camisetas.csv", "wb") as f:
+        f.write(file.file.read())
+    return {"ok": True}
+
+@app.post("/upload/precos")
+def upload_precos(file: UploadFile = File(...)):
+    with open(CSV_PRECOS, "wb") as f:
+        f.write(file.file.read())
+    return {"ok": True}
