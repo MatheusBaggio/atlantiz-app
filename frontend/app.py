@@ -43,17 +43,23 @@ with aba1:
         qg = cols[2].number_input("G (11,75)", 0)
         qgg = cols[3].number_input("GG (32,5)", 0)
         custo_estampa = qp * 1.8 + qm * 6.75 + qg * 11.75 + qgg * 32.5
-        valor_base = 25
-        unit = (valor_base + 5 + custo_estampa) * 1.07
-        total_item = unit * qtd
+
+        # ENVIA PARA O ENDPOINT QUE USA A TABELA REAL
         if st.button("Adicionar camisetas"):
-            st.session_state.carrinho.append({
-                "Produto": malha,
-                "Qtd": qtd,
-                "Unitario": round(unit, 2),
-                "Total": round(total_item, 2),
-                "Categoria": "Vestuario"
-            })
+            payload = {
+                "cliente": cliente,
+                "itens": [{
+                    "Produto": malha,
+                    "Qtd": qtd,
+                    "Custo_Estampa": custo_estampa
+                }]
+            }
+            resp = requests.post(f"{API}/orcamento/camisetas", json=payload)
+            if resp.ok:
+                item = resp.json()["itens"][0]
+                st.session_state.carrinho.append(item)
+            else:
+                st.error("Erro ao calcular camisetas")
 
     else:  # OUTROS PRODUTOS
         r = requests.get(f"{API}/precos")
