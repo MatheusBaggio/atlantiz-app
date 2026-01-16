@@ -101,7 +101,6 @@ def orcamento_camisetas(dados: dict):
 
 @app.post("/orcamento")
 def orcamento_outros(dados: dict):
-    # para produtos terceiros (sem malha)
     total = sum(i["Total"] for i in dados["itens"])
     return {"cliente": dados["cliente"], "total": calcular(total)}
 
